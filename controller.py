@@ -3,7 +3,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+from animation import two_wheel_ani
 import math
+import sys
 
 # 基本関数
 # 正規化
@@ -14,7 +16,10 @@ def min_max_normalize(data):
     max_data = max(data)
     min_data = min(data)
 
-    data = (data - min_data) / (max_data - min_data)
+    if max_data - min_data == 0:
+        data = [0.0 for i in range(len(data))]
+    else:
+        data = (data - min_data) / (max_data - min_data)
 
     return data
 # 角度補正用
@@ -28,6 +33,22 @@ def angle_range_corrector(angle):
             angle += 2 * math.pi
     
     return angle
+
+# 円を書く
+def write_circle(center_x, center_y, angle, circle_size=0.2):#人の大きさは半径15cm
+    # 初期化
+    circle_x = [] #位置を表す円のx
+    circle_y = [] #位置を表す円のy
+
+    steps = 100 #円を書く分解能はこの程度で大丈夫
+    for i in range(steps):
+        circle_x.append(center_x + circle_size*math.cos(i*2*math.pi/steps))
+        circle_y.append(center_y + circle_size*math.sin(i*2*math.pi/steps))
+    
+    circle_line_x = [center_x, center_x + math.cos(angle) * circle_size]
+    circle_line_y = [center_y, center_y + math.sin(angle) * circle_size]
+    
+    return circle_x, circle_y, circle_line_x, circle_line_y
 
 # ルール
 # x, y, thは基本的に今のstate
@@ -46,7 +67,7 @@ class Path():
         self.u_th = u_th
         
 class Two_wheeled_robot(): # 実際のロボット
-    def __init__(self, init_x=0.0, init_y=0.0, init_th=0.0):
+    def __init__(self, init_x, init_y, init_th):
         # 初期状態
         self.x = init_x
         self.y = init_y
@@ -62,14 +83,21 @@ class Two_wheeled_robot(): # 実際のロボット
         self.traj_u_th = [0.0]
 
     def update_state(self, u_th, u_v, dt): # stateを更新
+
+        self.u_th = u_th
+        self.u_v = u_v
         
-        next_x = u_v * math.cos(self.th) * dt + self.x
-        next_y = u_v * math.sin(self.th) * dt + self.y
-        next_th = u_th * dt + self.th
+        next_x = self.u_v * math.cos(self.th) * dt + self.x
+        next_y = self.u_v * math.sin(self.th) * dt + self.y
+        next_th = self.u_th * dt + self.th
 
         self.traj_x.append(next_x)
         self.traj_y.append(next_y)
         self.traj_th.append(next_th)
+
+        self.x = next_x
+        self.y = next_y
+        self.th = next_th
 
         return self.x, self.y, self.th # stateを更新
 
@@ -81,7 +109,7 @@ class Simulator_DWA_robot(): # DWAのシミュレータ用
         self.max_ang_accelation = 100 * math.pi /180
         # 速度制限
         self.lim_max_velo = 1.6 # m/s
-        self.lim_min_velo = -1.6 # m/s
+        self.lim_min_velo = 0.0 # m/s
         self.lim_max_ang_velo = math.pi/2
         self.lim_min_ang_velo = -math.pi/2
 
@@ -104,6 +132,8 @@ class Simulator_DWA_robot(): # DWAのシミュレータ用
             y = temp_y
             th = temp_th
 
+        # print('next_xs = {0}'.format(next_xs))
+
         return next_xs, next_ys, next_ths # 予想した軌跡
 
 # DWA
@@ -114,20 +144,20 @@ class DWA():
         self.simu_robot = Simulator_DWA_robot()
 
         # 予測時間(s)
-        self.pre_time = 2
-        self.pre_step = 20
+        self.pre_time = 3
+        self.pre_step = 30
 
         # 探索時の刻み幅
-        self.delta_velo = 0.2 
-        self.delta_ang_velo = 0.1
+        self.delta_velo = 0.02
+        self.delta_ang_velo = 0.02
 
         # サンプリングタイム(変更の場合，共通する項があるので，必ずほかのところも確認する)
         self.samplingtime = 0.1
 
         # 重みづけ
-        self.weight_angle = 0.5
-        self.weight_velo = 0.5
-        self.weight_obs = 0.5
+        self.weight_angle = 0.1
+        self.weight_velo = 0.2
+        self.weight_obs = 0.1
 
     def calc_input(self, g_x, g_y, state): # stateはロボットクラスでくる
         # Path作成
@@ -141,8 +171,16 @@ class DWA():
         # 角度と速度の範囲算出
         min_ang_velo, max_ang_velo, min_velo, max_velo = self._calc_range_velos(state)
 
+        # 障害物の範囲
+
+
         # 全てのpathのリスト
         paths = []
+
+        ang_velo_range = np.arange(min_ang_velo, max_ang_velo, self.delta_ang_velo)
+        print('max_ang_velo = {0}'.format(max_ang_velo))
+        print('min_ang_velo = {0}'.format(min_ang_velo))
+        print('ang_velo_range = {0}'.format(ang_velo_range))
 
         # 角速度と速度の組み合わせを全探索
         for ang_velo in np.arange(min_ang_velo, max_ang_velo, self.delta_ang_velo):
@@ -165,7 +203,7 @@ class DWA():
     def _calc_range_velos(self, state): # 角速度と角度の範囲決定①
         # 角速度
         range_ang_velo = self.samplingtime * self.simu_robot.max_ang_accelation
-        min_ang_velo = state.u_th + range_ang_velo
+        min_ang_velo = state.u_th - range_ang_velo
         max_ang_velo = state.u_th + range_ang_velo
         # 最小値
         if min_ang_velo < self.simu_robot.lim_min_ang_velo:
@@ -176,17 +214,16 @@ class DWA():
 
         # 速度
         range_velo = self.samplingtime * self.simu_robot.max_accelation
-        min_velo = state.u_v + range_velo
+        min_velo = state.u_v - range_velo
         max_velo = state.u_v + range_velo
         # 最小値
         if min_velo < self.simu_robot.lim_min_velo:
             min_velo = self.simu_robot.lim_min_velo
         # 最大値
-        if max_velo < self.simu_robot.lim_max_velo:
+        if max_velo > self.simu_robot.lim_max_velo:
             max_velo = self.simu_robot.lim_max_velo
 
         return min_ang_velo, max_ang_velo, min_velo, max_velo
-
 
     def _eval_path(self, paths, g_x, g_y):
         score_heading_angles = []
@@ -205,19 +242,21 @@ class DWA():
         # 正規化
         for scores in [score_heading_angles, score_heading_velos, score_obstacles]:
             scores = min_max_normalize(scores)
+            # print('angle_to_goal = {0}'.format(scores))
 
-        score = float('inf')
+        score = 0.0
         # 最小pathを探索
         for k in range(len(paths)):
             temp_score = 0.0
 
             temp_score = self.weight_angle * score_heading_angles[k] + \
-                         self.weight_velo * score_heading_velos[k] + \
-                         self.weight_obs * score_obstacles[k]
+                         self.weight_velo * score_heading_velos[k] # + \
+                         # self.weight_obs * score_obstacles[k]
         
-            if temp_score < score:
+            if temp_score > score:
                 opt_path = paths[k]
-
+                score = temp_score
+                
         return opt_path
 
     def _heading_angle(self, path, g_x, g_y):
@@ -233,7 +272,12 @@ class DWA():
         score_angle = angle_to_goal - last_th
 
         # ぐるぐる防止
-        score_angle = angle_range_corrector(score_angle)
+        score_angle = abs(angle_range_corrector(score_angle))
+        
+        # 最大と最小をひっくり返す
+        score_angle = math.pi - score_angle
+
+        # print('score_sngle = {0}' .format(score_angle))
 
         return score_angle
 
@@ -271,25 +315,41 @@ class Main_controller():# Mainの制御クラス
 
     def run_to_goal(self):
         goal_flag = False
+        counter = 0
 
-        while not goal_flag:
+        # while not goal_flag:
+        for i in range(1000):
             # ゴール作成
+            # print(i)
             g_x, g_y = self.goal.calc_goal()
 
             # 入力決定
             paths, opt_path = self.controller.calc_input(g_x, g_y, self.robot)
 
             # グラフ表示
-            for path in paths:
-                plt.plot(path.x, path.y)
+            # for path in paths:
+                # plt.plot(path.x, path.y)
+
+            # plt.plot(g_x, g_y, '*', color='b', markersize=15)
+
+            # plt.plot(opt_path.x, opt_path.y, color='r', linestyle='dashdot')
+
+            # plt.show()
             
-            plt.show()
-            
+            # plt.plot(g_x, g_y, '*', color='b', markersize=15)
+
             u_th = opt_path.u_th
             u_v = opt_path.u_v
             
             # 入力で状態更新
             self.robot.update_state(u_th, u_v, self.samplingtime)
+
+            # circle_x, circle_y, circle_line_x, circle_line_y = write_circle(self.robot.x, self.robot.y, self.robot.th)
+            
+            # plt.plot(circle_x, circle_y)
+            # plt.plot(circle_line_x, circle_line_y)
+
+            # plt.show()
 
             # goal判定
             dis_to_goal = np.sqrt((g_x-self.robot.x)*(g_x-self.robot.x) + (g_y-self.robot.y)*(g_y-self.robot.y))
@@ -299,9 +359,13 @@ class Main_controller():# Mainの制御クラス
         return self.robot.traj_x, self.robot.traj_y, self.robot.traj_th
 
 
+
 def main():
     controller = Main_controller()
     traj_x, traj_y, traj_th = controller.run_to_goal()
+
+    plt.plot(traj_x, traj_y)
+    plt.show()
 
 
 if __name__ == '__main__':
