@@ -161,20 +161,17 @@ class DWA():
         # すべてのPathを保存
         self.traj_paths = []
 
-    def calc_input(self, g_x, g_y, state): # stateはロボットクラスでくる
+    def calc_input(self, g_x, g_y, state, obstcles): # stateはロボットクラスでくる
         # Path作成
         paths = self._make_path(state)
         # Path評価
-        opt_path = self._eval_path(paths, g_x, g_y)
+        opt_path = self._eval_path(paths, g_x, g_y, obstacles)
         
         return paths, opt_path
 
     def _make_path(self, state): 
         # 角度と速度の範囲算出
         min_ang_velo, max_ang_velo, min_velo, max_velo = self._calc_range_velos(state)
-
-        # 障害物の範囲
-        # min_ang_velo, max_ang_velo, min_velo, max_velo = self._calc_range_obs_velos(min_ang_velo, max_ang_velo, min_velo, max_velo)
 
         # 全てのpathのリスト
         paths = []
@@ -227,34 +224,7 @@ class DWA():
 
         return min_ang_velo, max_ang_velo, min_velo, max_velo
 
-    '''
-    def _calc_range_obs_velos(self, min_ang_velo, max_ang_velo, min_velo, max_velo): # 角速度と角度の範囲決定障害物考慮
-        # 角速度
-        range_ang_velo = self.samplingtime * self.simu_robot.max_ang_accelation
-        min_ang_velo = state.u_th - range_ang_velo
-        max_ang_velo = state.u_th + range_ang_velo
-        # 最小値
-        if min_ang_velo < self.simu_robot.lim_min_ang_velo:
-            min_ang_velo = self.simu_robot.lim_min_ang_velo
-        # 最大値
-        if max_ang_velo > self.simu_robot.lim_max_ang_velo:
-            max_ang_velo = self.simu_robot.lim_max_ang_velo
-
-        # 速度
-        range_velo = self.samplingtime * self.simu_robot.max_accelation
-        min_velo = state.u_v - range_velo
-        max_velo = state.u_v + range_velo
-        # 最小値
-        if min_velo < self.simu_robot.lim_min_velo:
-            min_velo = self.simu_robot.lim_min_velo
-        # 最大値
-        if max_velo > self.simu_robot.lim_max_velo:
-            max_velo = self.simu_robot.lim_max_velo
-
-        return min_ang_velo, max_ang_velo, min_velo, max_velo
-    '''
-
-    def _eval_path(self, paths, g_x, g_y):
+    def _eval_path(self, paths, g_x, g_y, obastacles):
         score_heading_angles = []
         score_heading_velos = []
         score_obstacles = []
@@ -266,7 +236,7 @@ class DWA():
             # (2) heading_velo
             score_heading_velos.append(self._heading_velo(path))
             # (3)obstacle
-            score_obstacles.append(self._obstacle(path))
+            score_obstacles.append(self._obstacle(path, obastacles))
 
         # 正規化
         for scores in [score_heading_angles, score_heading_velos, score_obstacles]:
@@ -279,8 +249,8 @@ class DWA():
             temp_score = 0.0
 
             temp_score = self.weight_angle * score_heading_angles[k] + \
-                         self.weight_velo * score_heading_velos[k] # + \
-                         # self.weight_obs * score_obstacles[k]
+                         self.weight_velo * score_heading_velos[k] + \
+                         self.weight_obs * score_obstacles[k]
         
             if temp_score > score:
                 opt_path = paths[k]
@@ -316,9 +286,13 @@ class DWA():
 
         return score_heading_velo
 
-    def _obstacle(self, path):#  obastacles):
-        # 障害物回避（エリアに入ったらその線は使わない）/ 今回はなし
-        score_obstacle = 0.0
+    def _obstacle(self, path, obstacles):
+        # 障害物回避（エリアに入ったらその線は使わない）/ (障害物ともっとも近い距離距離)))
+        score_obstacle = -float('inf')
+
+
+
+
         return score_obstacle
 
 class Const_goal():# goal作成プログラム
@@ -346,6 +320,9 @@ class Main_controller():# Mainの制御クラス
         self.goal_maker = Const_goal()
         self.controller = DWA()
 
+        # 障害物（本当はレーザーの値等を使用）
+        self.obstacles = [[2, 3, 0.5], [-1, 3, 0.5], [1, 1, 5]]
+
         # ここを変えたら他もチェック
         self.samplingtime = 0.1
 
@@ -357,7 +334,7 @@ class Main_controller():# Mainの制御クラス
             g_x, g_y = self.goal_maker.calc_goal(time_step)
 
             # 入力決定
-            paths, opt_path = self.controller.calc_input(g_x, g_y, self.robot)
+            paths, opt_path = self.controller.calc_input(g_x, g_y, self.robot, self.obstacles)
 
             u_th = opt_path.u_th
             u_v = opt_path.u_v
@@ -373,16 +350,16 @@ class Main_controller():# Mainの制御クラス
             time_step += 1
 
         return self.robot.traj_x, self.robot.traj_y, self.robot.traj_th, \
-                self.goal_maker.traj_g_x, self.goal_maker.traj_g_y, self.controller.traj_paths
+                self.goal_maker.traj_g_x, self.goal_maker.traj_g_y, self.controller.traj_paths, self.obstacles
 
 def main():
     animation = Animation_robot()
     animation.fig_set()
 
     controller = Main_controller()
-    traj_x, traj_y, traj_th, traj_g_x, traj_g_y, traj_paths = controller.run_to_goal()
+    traj_x, traj_y, traj_th, traj_g_x, traj_g_y, traj_paths, obastacles = controller.run_to_goal()
 
-    ani = animation.func_anim_plot(traj_x, traj_y, traj_th, traj_paths, traj_g_x, traj_g_y) # , obstacles)
+    ani = animation.func_anim_plot(traj_x, traj_y, traj_th, traj_paths, traj_g_x, traj_g_y, obstacles)
 
 if __name__ == '__main__':
     main()
