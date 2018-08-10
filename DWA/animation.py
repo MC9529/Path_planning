@@ -36,7 +36,7 @@ class Obstacle_anim():
     def set_graph_data(self, obstacle):
         angle = 0.0
         circle_x, circle_y, circle_line_x, circle_line_y = \
-                write_circle(obstacle[0], obstacle[1], angle, circle_size=obstacle[2]):
+                write_circle(obstacle.x, obstacle.y, angle, circle_size=obstacle.size)
 
         self.obs_img.set_data(circle_x, circle_y)
 
@@ -49,10 +49,10 @@ class Animation_robot():
 
     def fig_set(self):
         # 初期設定 軸
-        MAX_x = 5
-        min_x = -5
-        MAX_y = 5
-        min_y = -5
+        MAX_x = 12
+        min_x = -12
+        MAX_y = 12
+        min_y = -12
 
         self.axis.set_xlim(min_x, MAX_x)
         self.axis.set_ylim(min_y, MAX_y)
@@ -72,7 +72,7 @@ class Animation_robot():
 
         plt.show()
     
-    def func_anim_plot(self, traj_x, traj_y, traj_th, traj_paths, traj_g_x, traj_g_y, obstacles):
+    def func_anim_plot(self, traj_x, traj_y, traj_th, traj_paths, traj_g_x, traj_g_y, traj_opt, obstacles):
         # selfにしておく
         self.traj_x = traj_x
         self.traj_y = traj_y
@@ -80,6 +80,8 @@ class Animation_robot():
         self.traj_paths = traj_paths
         self.traj_g_x = traj_g_x
         self.traj_g_y = traj_g_y
+        self.traj_opt = traj_opt
+        self.obstacles = obstacles
 
         # trajお絵かき
         self.traj_img, = self.axis.plot([], [], 'k', linestyle='dashed')
@@ -98,6 +100,9 @@ class Animation_robot():
         for k in range(self.max_path_num):
             self.dwa_paths.append(Path_anim(self.axis))
 
+        # opt_traj
+        self.traj_opt_img, = self.axis.plot([], [], '#ff7f00', linestyle='dashed', marker='.' , markersize=0.5)
+
         # 障害物
         self.obs = []
         self.obstacles_num = len(obstacles)
@@ -110,6 +115,13 @@ class Animation_robot():
 
         animation = ani.FuncAnimation(self.fig, self._update_anim, interval=100, \
                               frames=len(traj_g_x))
+
+
+        print('save_animation?')
+        shuold_save_animation = int(input())
+
+        if shuold_save_animation: 
+            animation.save('basic_animation.gif', writer='imagemagick')
 
         plt.show()
 
@@ -132,6 +144,8 @@ class Animation_robot():
 
         self.img_goal.set_data(self.traj_g_x[i], self.traj_g_y[i])
 
+        self.traj_opt_img.set_data(self.traj_opt[i].x, self.traj_opt[i].y)
+
         count = 0
         # path_num = np.random.randint(0, len(self.traj_paths[i]), (1, 100))
         # print(path_num)
@@ -146,11 +160,12 @@ class Animation_robot():
 
         # obstacles
         for k in range(self.obstacles_num):
-            self.obs_imgs.append(self.obs[k].set_data(self.obstacles[k]))      
+            self.obs_imgs.append(self.obs[k].set_graph_data(self.obstacles[k]))      
 
         self.step_text.set_text('step = {0}'.format(i))
 
-        for img in [self.traj_img, self.robot_img, self.robot_angle_img, self.img_goal, self.step_text, self.dwa_path_imgs, self.obs_imgs]:
+        for img in [self.traj_img, self.robot_img, self.robot_angle_img, self.img_goal, self.step_text, self.dwa_path_imgs, self.obs_imgs, self.traj_opt_img]:
             self.dwa_imgs.append(img)
+
 
         return self.dwa_imgs

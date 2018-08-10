@@ -1,5 +1,7 @@
 # controller
 import numpy as np
+np.seterr(divide='ignore', invalid='ignore')
+
 import matplotlib.pyplot as plt
 import pandas as pd
 from animation import Animation_robot
@@ -64,6 +66,12 @@ class Path():
         self.th = None
         self.u_v = u_v
         self.u_th = u_th
+
+class Obstacle():
+    def __init__(self, x, y, size):
+        self.x = x
+        self.y = y
+        self.size = size
         
 class Two_wheeled_robot(): # 実際のロボット
     def __init__(self, init_x, init_y, init_th):
@@ -109,8 +117,8 @@ class Simulator_DWA_robot(): # DWAのシミュレータ用
         # 速度制限
         self.lim_max_velo = 1.6 # m/s
         self.lim_min_velo = 0.0 # m/s
-        self.lim_max_ang_velo = math.pi/2
-        self.lim_min_ang_velo = -math.pi/2
+        self.lim_max_ang_velo = math.pi
+        self.lim_min_ang_velo = -math.pi
 
     # 予想状態を作成する
     def predict_state(self, ang_velo, velo, x, y, th, dt, pre_step): # DWA用(何秒後かのstateを予測))
@@ -154,18 +162,21 @@ class DWA():
         self.samplingtime = 0.1
 
         # 重みづけ
-        self.weight_angle = 0.1
+        self.weight_angle = 0.05
         self.weight_velo = 0.2
         self.weight_obs = 0.1
 
         # すべてのPathを保存
         self.traj_paths = []
+        self.traj_opt = []
 
-    def calc_input(self, g_x, g_y, state, obstcles): # stateはロボットクラスでくる
+    def calc_input(self, g_x, g_y, state, obstacles): # stateはロボットクラスでくる
         # Path作成
         paths = self._make_path(state)
         # Path評価
-        opt_path = self._eval_path(paths, g_x, g_y, obstacles)
+        opt_path = self._eval_path(paths, g_x, g_y, state, obstacles)
+
+        self.traj_opt.append(opt_path)
         
         return paths, opt_path
 
@@ -175,8 +186,6 @@ class DWA():
 
         # 全てのpathのリスト
         paths = []
-
-        ang_velo_range = np.arange(min_ang_velo, max_ang_velo, self.delta_ang_velo)
 
         # 角速度と速度の組み合わせを全探索
         for ang_velo in np.arange(min_ang_velo, max_ang_velo, self.delta_ang_velo):
@@ -224,7 +233,10 @@ class DWA():
 
         return min_ang_velo, max_ang_velo, min_velo, max_velo
 
-    def _eval_path(self, paths, g_x, g_y, obastacles):
+    def _eval_path(self, paths, g_x, g_y, state, obastacles):
+        # 一番近い障害物判定
+        nearest_obs = self._calc_nearest_obs(state, obastacles)
+
         score_heading_angles = []
         score_heading_velos = []
         score_obstacles = []
@@ -235,13 +247,16 @@ class DWA():
             score_heading_angles.append(self._heading_angle(path, g_x, g_y))
             # (2) heading_velo
             score_heading_velos.append(self._heading_velo(path))
-            # (3)obstacle
-            score_obstacles.append(self._obstacle(path, obastacles))
+            # (3) obstacle
+            score_obstacles.append(self._obstacle(path, nearest_obs))
+
+        # print('angle = {0}'.format(score_heading_angles))
+        # print('velo = {0}'.format(score_heading_velos))
+        # print('obs = {0}'.format(score_obstacles))
 
         # 正規化
         for scores in [score_heading_angles, score_heading_velos, score_obstacles]:
             scores = min_max_normalize(scores)
-            # print('angle_to_goal = {0}'.format(scores))
 
         score = 0.0
         # 最小pathを探索
@@ -258,7 +273,7 @@ class DWA():
                 
         return opt_path
 
-    def _heading_angle(self, path, g_x, g_y):
+    def _heading_angle(self, path, g_x, g_y): # ゴールに向いているか
         # 終端の向き
         last_x = path.x[-1]
         last_y = path.y[-1]
@@ -280,18 +295,45 @@ class DWA():
 
         return score_angle
 
-    def _heading_velo(self, path): 
+    def _heading_velo(self, path): # 速く進んでいるか（直進）
 
         score_heading_velo = path.u_v
 
         return score_heading_velo
 
-    def _obstacle(self, path, obstacles):
+    def _calc_nearest_obs(self, state, obstacles):
+        area_dis_to_obs = 5 # パラメータ（何メートル考慮するか，本当は制動距離）
+        nearest_obs = [] # あるエリアに入ってる障害物
+
+        for obs in obstacles:
+            temp_dis_to_obs = math.sqrt((state.x - obs.x) ** 2 + (state.y - obs.y) ** 2)
+
+            if temp_dis_to_obs < area_dis_to_obs :
+                nearest_obs.append(obs)
+
+        return nearest_obs
+
+    def _obstacle(self, path, nearest_obs):
         # 障害物回避（エリアに入ったらその線は使わない）/ (障害物ともっとも近い距離距離)))
-        score_obstacle = -float('inf')
+        score_obstacle = 2
+        temp_dis_to_obs = 0.0
 
+        for i in range(len(path.x)):
+            for obs in nearest_obs: 
+                temp_dis_to_obs = math.sqrt((path.x[i] - obs.x) * (path.x[i] - obs.x) + (path.y[i] - obs.y) *  (path.y[i] - obs.y))
+                
+                if temp_dis_to_obs < score_obstacle:
+                    score_obstacle = temp_dis_to_obs # 一番近いところ
 
-
+                # そもそも中に入ってる判定
+                if temp_dis_to_obs < obs.size + 0.75: # マージン
+                    score_obstacle = -float('inf')
+                    break
+            
+            else:
+                continue
+            
+            break
 
         return score_obstacle
 
@@ -302,12 +344,12 @@ class Const_goal():# goal作成プログラム
         self.traj_g_y = []
 
     def calc_goal(self, time_step): # 本当は人の値が入ってもよいかも
-        if time_step <= 25:
-            g_x  = 2.5
-            g_y = 2.5
+        if time_step <= 70:
+            g_x  = 10.0
+            g_y = 10.0
         else:
-            g_x = -2.5
-            g_y = -2.5
+            g_x = -10.0
+            g_y = -10.0
 
         self.traj_g_x.append(g_x)
         self.traj_g_y.append(g_y)
@@ -321,7 +363,18 @@ class Main_controller():# Mainの制御クラス
         self.controller = DWA()
 
         # 障害物（本当はレーザーの値等を使用）
-        self.obstacles = [[2, 3, 0.5], [-1, 3, 0.5], [1, 1, 5]]
+        self.obstacles = []
+        '''
+        obstacle_num = 3
+        for i in range(obstacle_num):
+            # x = np.random.randint(-5, 5)
+            # y = np.random.randint(-5, 5)
+            # size = np.random.randint(-5, 5)
+
+            self.obstacles.append(Obstacle(x, y, size))
+        '''
+
+        self.obstacles =[Obstacle(4, 1, 0.25), Obstacle(0, 4.5, 0.25),  Obstacle(1, 4.5, 0.25), Obstacle(5, 3.5, 0.25),  Obstacle(7.5, 9.0, 0.25),  Obstacle(7.5, 6, 0.25)]
 
         # ここを変えたら他もチェック
         self.samplingtime = 0.1
@@ -331,6 +384,7 @@ class Main_controller():# Mainの制御クラス
         time_step = 0
 
         while not goal_flag:
+        # for i in range(250):
             g_x, g_y = self.goal_maker.calc_goal(time_step)
 
             # 入力決定
@@ -350,16 +404,16 @@ class Main_controller():# Mainの制御クラス
             time_step += 1
 
         return self.robot.traj_x, self.robot.traj_y, self.robot.traj_th, \
-                self.goal_maker.traj_g_x, self.goal_maker.traj_g_y, self.controller.traj_paths, self.obstacles
+                self.goal_maker.traj_g_x, self.goal_maker.traj_g_y, self.controller.traj_paths, self.controller.traj_opt, self.obstacles
 
 def main():
     animation = Animation_robot()
     animation.fig_set()
 
     controller = Main_controller()
-    traj_x, traj_y, traj_th, traj_g_x, traj_g_y, traj_paths, obastacles = controller.run_to_goal()
+    traj_x, traj_y, traj_th, traj_g_x, traj_g_y, traj_paths, traj_opt, obstacles = controller.run_to_goal()
 
-    ani = animation.func_anim_plot(traj_x, traj_y, traj_th, traj_paths, traj_g_x, traj_g_y, obstacles)
+    ani = animation.func_anim_plot(traj_x, traj_y, traj_th, traj_paths, traj_g_x, traj_g_y, traj_opt, obstacles)
 
 if __name__ == '__main__':
     main()
