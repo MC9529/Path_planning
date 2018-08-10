@@ -291,8 +291,6 @@ class DWA():
         # 最大と最小をひっくり返す
         score_angle = math.pi - score_angle
 
-        # print('score_sngle = {0}' .format(score_angle))
-
         return score_angle
 
     def _heading_velo(self, path): # 速く進んでいるか（直進）
@@ -329,7 +327,7 @@ class DWA():
                 if temp_dis_to_obs < obs.size + 0.75: # マージン
                     score_obstacle = -float('inf')
                     break
-            
+
             else:
                 continue
             
@@ -373,7 +371,6 @@ class Main_controller():# Mainの制御クラス
 
             self.obstacles.append(Obstacle(x, y, size))
         '''
-
         self.obstacles =[Obstacle(4, 1, 0.25), Obstacle(0, 4.5, 0.25),  Obstacle(1, 4.5, 0.25), Obstacle(5, 3.5, 0.25),  Obstacle(7.5, 9.0, 0.25),  Obstacle(7.5, 6, 0.25)]
 
         # ここを変えたら他もチェック
