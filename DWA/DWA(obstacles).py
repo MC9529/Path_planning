@@ -142,7 +142,7 @@ class Simulator_DWA_robot(): # DWAのシミュレータ用
 
         return next_xs, next_ys, next_ths # 予想した軌跡
 
-# DWA Dynamic WIndow 
+# DWA Dynamic WIndow Approach
 class DWA():
     def __init__(self):
         # 初期化
