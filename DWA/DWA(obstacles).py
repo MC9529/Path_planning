@@ -1,9 +1,8 @@
 # controller
-
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-from animation import two_wheel_ani
+from animation import Animation_robot
 import math
 import sys
 
@@ -159,6 +158,9 @@ class DWA():
         self.weight_velo = 0.2
         self.weight_obs = 0.1
 
+        # すべてのPathを保存
+        self.traj_paths = []
+
     def calc_input(self, g_x, g_y, state): # stateはロボットクラスでくる
         # Path作成
         paths = self._make_path(state)
@@ -172,15 +174,12 @@ class DWA():
         min_ang_velo, max_ang_velo, min_velo, max_velo = self._calc_range_velos(state)
 
         # 障害物の範囲
-
+        # min_ang_velo, max_ang_velo, min_velo, max_velo = self._calc_range_obs_velos(min_ang_velo, max_ang_velo, min_velo, max_velo)
 
         # 全てのpathのリスト
         paths = []
 
         ang_velo_range = np.arange(min_ang_velo, max_ang_velo, self.delta_ang_velo)
-        print('max_ang_velo = {0}'.format(max_ang_velo))
-        print('min_ang_velo = {0}'.format(min_ang_velo))
-        print('ang_velo_range = {0}'.format(ang_velo_range))
 
         # 角速度と速度の組み合わせを全探索
         for ang_velo in np.arange(min_ang_velo, max_ang_velo, self.delta_ang_velo):
@@ -197,6 +196,9 @@ class DWA():
             
                 # 作ったpathを追加
                 paths.append(path)
+        
+        # 時刻歴Pathを保存
+        self.traj_paths.append(paths)
 
         return paths
 
@@ -224,6 +226,33 @@ class DWA():
             max_velo = self.simu_robot.lim_max_velo
 
         return min_ang_velo, max_ang_velo, min_velo, max_velo
+
+    '''
+    def _calc_range_obs_velos(self, min_ang_velo, max_ang_velo, min_velo, max_velo): # 角速度と角度の範囲決定障害物考慮
+        # 角速度
+        range_ang_velo = self.samplingtime * self.simu_robot.max_ang_accelation
+        min_ang_velo = state.u_th - range_ang_velo
+        max_ang_velo = state.u_th + range_ang_velo
+        # 最小値
+        if min_ang_velo < self.simu_robot.lim_min_ang_velo:
+            min_ang_velo = self.simu_robot.lim_min_ang_velo
+        # 最大値
+        if max_ang_velo > self.simu_robot.lim_max_ang_velo:
+            max_ang_velo = self.simu_robot.lim_max_ang_velo
+
+        # 速度
+        range_velo = self.samplingtime * self.simu_robot.max_accelation
+        min_velo = state.u_v - range_velo
+        max_velo = state.u_v + range_velo
+        # 最小値
+        if min_velo < self.simu_robot.lim_min_velo:
+            min_velo = self.simu_robot.lim_min_velo
+        # 最大値
+        if max_velo > self.simu_robot.lim_max_velo:
+            max_velo = self.simu_robot.lim_max_velo
+
+        return min_ang_velo, max_ang_velo, min_velo, max_velo
+    '''
 
     def _eval_path(self, paths, g_x, g_y):
         score_heading_angles = []
@@ -287,27 +316,34 @@ class DWA():
 
         return score_heading_velo
 
-    def _obstacle(self, path):
+    def _obstacle(self, path):#  obastacles):
         # 障害物回避（エリアに入ったらその線は使わない）/ 今回はなし
         score_obstacle = 0.0
         return score_obstacle
 
-
 class Const_goal():# goal作成プログラム
     def __init__(self):
         # self.human_trajectory = ...的な
-        pass
+        self.traj_g_x = []
+        self.traj_g_y = []
 
-    def calc_goal(self): # 本当は人の値が入ってもよいかも
-        g_x  = 5.0
-        g_y = 5.0
+    def calc_goal(self, time_step): # 本当は人の値が入ってもよいかも
+        if time_step <= 25:
+            g_x  = 2.5
+            g_y = 2.5
+        else:
+            g_x = -2.5
+            g_y = -2.5
+
+        self.traj_g_x.append(g_x)
+        self.traj_g_y.append(g_y)
 
         return g_x, g_y
 
 class Main_controller():# Mainの制御クラス
     def __init__(self):
         self.robot = Two_wheeled_robot(0.0, 0.0, 0.0)
-        self.goal = Const_goal()
+        self.goal_maker = Const_goal()
         self.controller = DWA()
 
         # ここを変えたら他もチェック
@@ -315,28 +351,13 @@ class Main_controller():# Mainの制御クラス
 
     def run_to_goal(self):
         goal_flag = False
-        counter = 0
+        time_step = 0
 
-        # while not goal_flag:
-        for i in range(1000):
-            # ゴール作成
-            # print(i)
-            g_x, g_y = self.goal.calc_goal()
+        while not goal_flag:
+            g_x, g_y = self.goal_maker.calc_goal(time_step)
 
             # 入力決定
             paths, opt_path = self.controller.calc_input(g_x, g_y, self.robot)
-
-            # グラフ表示
-            # for path in paths:
-                # plt.plot(path.x, path.y)
-
-            # plt.plot(g_x, g_y, '*', color='b', markersize=15)
-
-            # plt.plot(opt_path.x, opt_path.y, color='r', linestyle='dashdot')
-
-            # plt.show()
-            
-            # plt.plot(g_x, g_y, '*', color='b', markersize=15)
 
             u_th = opt_path.u_th
             u_v = opt_path.u_v
@@ -344,29 +365,24 @@ class Main_controller():# Mainの制御クラス
             # 入力で状態更新
             self.robot.update_state(u_th, u_v, self.samplingtime)
 
-            # circle_x, circle_y, circle_line_x, circle_line_y = write_circle(self.robot.x, self.robot.y, self.robot.th)
-            
-            # plt.plot(circle_x, circle_y)
-            # plt.plot(circle_line_x, circle_line_y)
-
-            # plt.show()
-
             # goal判定
             dis_to_goal = np.sqrt((g_x-self.robot.x)*(g_x-self.robot.x) + (g_y-self.robot.y)*(g_y-self.robot.y))
-            if dis_to_goal < 0.1:
+            if dis_to_goal < 0.5:
                 goal_flag = True
+            
+            time_step += 1
 
-        return self.robot.traj_x, self.robot.traj_y, self.robot.traj_th
-
-
+        return self.robot.traj_x, self.robot.traj_y, self.robot.traj_th, \
+                self.goal_maker.traj_g_x, self.goal_maker.traj_g_y, self.controller.traj_paths
 
 def main():
+    animation = Animation_robot()
+    animation.fig_set()
+
     controller = Main_controller()
-    traj_x, traj_y, traj_th = controller.run_to_goal()
+    traj_x, traj_y, traj_th, traj_g_x, traj_g_y, traj_paths = controller.run_to_goal()
 
-    plt.plot(traj_x, traj_y)
-    plt.show()
-
+    ani = animation.func_anim_plot(traj_x, traj_y, traj_th, traj_paths, traj_g_x, traj_g_y) # , obstacles)
 
 if __name__ == '__main__':
     main()
