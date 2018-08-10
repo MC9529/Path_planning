@@ -140,8 +140,6 @@ class Simulator_DWA_robot(): # DWAのシミュレータ用
             y = temp_y
             th = temp_th
 
-        # print('next_xs = {0}'.format(next_xs))
-
         return next_xs, next_ys, next_ths # 予想した軌跡
 
 # DWA
