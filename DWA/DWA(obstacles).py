@@ -1,5 +1,6 @@
 # controller
 import numpy as np
+# これで割り算を無し
 np.seterr(divide='ignore', invalid='ignore')
 
 import matplotlib.pyplot as plt
